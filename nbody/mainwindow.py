@@ -28,7 +28,7 @@ class MainWindow(QMainWindow):
                 position=Vector3([px, py, pz]),
                 velocity=Vector3(),
                 mass=1,
-                radius=0.1)
+                radius=0.5)
             self.sim_view.sim.particles.append(p)
 
         self.setCentralWidget(self.sim_view)

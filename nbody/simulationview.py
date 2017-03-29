@@ -16,7 +16,6 @@ from OpenGL.arrays.vbo import VBO
 from ctypes import c_void_p
 
 from PyQt5.QtCore import QSize, QTimer
-from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import QOpenGLWidget
 
 from .sim import NBodySimulation
@@ -49,6 +48,7 @@ class SimulationView(QOpenGLWidget):
 
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glBlendEquation(GL_FUNC_ADD)
 
         try:
             with open(os.path.join(os.path.dirname(__file__), 'sim.vert'), 'r') as f:
@@ -84,23 +84,23 @@ class SimulationView(QOpenGLWidget):
             shader=self.shader,
             attr_prefix='sprite_')
 
-        self.sprite_img = load_image(os.path.join(os.path.dirname(__file__), 'particle_sprite.png'), QImage.Format_RGBA8888)
+        sprite_img = self._gen_sprite_img()
         self.sprite_texture = glGenTextures(1)
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, self.sprite_texture)
         glTexImage2D(
             GL_TEXTURE_2D,
             0,
-            GL_RGBA,
-            self.sprite_img.shape[1],
-            self.sprite_img.shape[0],
+            GL_RED,
+            sprite_img.shape[0],
+            sprite_img.shape[1],
             0,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            self.sprite_img)
+            GL_RED,
+            GL_FLOAT,
+            sprite_img)
         glUniform1i(glGetUniformLocation(self.shader, 'tex'), 0)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         glBindTexture(GL_TEXTURE_2D, 0)
@@ -182,6 +182,17 @@ class SimulationView(QOpenGLWidget):
     def _particle_sort(self, particle):
         return (self.camera.eye - particle.position).squared_length
 
+    def _gen_sprite_img(self):
+        resolution = 64
+        ramp_pwr = -1.5
+
+        img = np.zeros((resolution, resolution), dtype=np.complex)
+        l = np.linspace(-1, 1, resolution)
+        img.real, img.imag = np.meshgrid(l, l)
+        img = np.abs(img) ** (2 ** ramp_pwr)
+        img = 1 - img
+        return img.astype(np.float32)
+
 class Camera(object):
     def __init__(self, eye, at, up, fovx, aspect, near, far):
         self.eye = eye
@@ -261,10 +272,3 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
             glVertexAttribDivisor(loc, divisor)
         vbo.copy_data()
     return vbo
-
-def load_image(path, format):
-    img = QImage(os.path.join(os.path.dirname(__file__), 'particle_sprite.png')).convertToFormat(format)
-    ptr = img.constBits()
-    ptr.setsize(img.byteCount())
-    arr = np.array(ptr).reshape(img.height(), img.width(), -1)
-    return arr
