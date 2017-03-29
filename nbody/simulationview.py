@@ -31,9 +31,9 @@ class SimulationView(QOpenGLWidget):
         self.size = QSize(800, 500)
 
         self.camera = Camera(
-            eye=Vector3([3.0, 6.0, -10.0]),
+            eye=Vector3([0.0, 0.0, 10.0]),
             at=Vector3([0.0, 0.0, 0.0]),
-            up=Vector3([0.0, -1.0, 0.0]),
+            up=Vector3([0.0, 1.0, 0.0]),
             fovx=np.deg2rad(90.0),
             aspect=self.size.width() / self.size.height(),
             near=0.01,
@@ -63,7 +63,8 @@ class SimulationView(QOpenGLWidget):
             exit(1)
         glUseProgram(self.shader)
 
-        self.mvp_loc = glGetUniformLocation(self.shader, 'mvp')
+        self.view_loc = glGetUniformLocation(self.shader, 'view')
+        self.proj_loc = glGetUniformLocation(self.shader, 'proj')
 
         self.vao = glGenVertexArrays(1)
         glBindVertexArray(self.vao)
@@ -137,9 +138,6 @@ class SimulationView(QOpenGLWidget):
 
         self.last_update_time = t
 
-    def _particle_sort(self, particle):
-        return (self.camera.eye - particle.position).squared_length
-
     def paintGL(self):
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -147,20 +145,17 @@ class SimulationView(QOpenGLWidget):
         glUseProgram(self.shader)
         glBindVertexArray(self.vao)
 
-        glUniformMatrix4fv(self.mvp_loc, 1, GL_FALSE, self.camera.view_proj.astype(np.float32))
-
-        for i, particle in enumerate(sorted(self.sim.particles, key=self._particle_sort)):
-            self.particle_data[i]['radius'] = particle.radius
-            self.particle_data[i]['position'] = particle.position
-        # print('='*80)
-        # print(self.particle_data[:len(self.sim.particles)])
+        for i, particle in enumerate(sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
+            d = self.particle_data[i]
+            d['radius'] = particle.radius
+            d['position'] = particle.position
 
         with self.particle_data_vbo:
             self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
 
         glBindTexture(GL_TEXTURE_2D, self.sprite_texture)
 
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, len(self.sim.particles))
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
 
         glBindTexture(GL_TEXTURE_2D, 0)
 
@@ -170,7 +165,22 @@ class SimulationView(QOpenGLWidget):
     def resizeGL(self, width, height):
         self.size = QSize(width, height)
         self.camera.aspect = self.size.width() / self.size.height()
+        self.camera_update()
+
+    def camera_update(self):
         self.camera.update()
+
+        glUseProgram(self.shader)
+        glBindVertexArray(self.vao)
+
+        glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
+        glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
+
+        glBindVertexArray(0)
+        glUseProgram(0)
+
+    def _particle_sort(self, particle):
+        return (self.camera.eye - particle.position).squared_length
 
 class Camera(object):
     def __init__(self, eye, at, up, fovx, aspect, near, far):
@@ -182,48 +192,37 @@ class Camera(object):
         self.near = near
         self.far = far
 
-        self._view_proj = None
-
-    @property
-    def view_proj(self):
-        if self._view_proj is None:
-            eye = self.eye
-            at = self.at
-            up = self.up
-
-            # TODO: only thing left is weird projection still
-            # position coordinates still seem to be in canonical volume coordinates? at least the z is?
-            n = (at - eye).normalised
-            u = up.normalised.cross(n)
-            v = n.cross(u)
-            view = Matrix44(
-                [[u.x, u.y, u.z, -u.dot(eye)],
-                 [v.x, v.y, v.z, -v.dot(eye)],
-                 [n.x, n.y, n.z, -n.dot(eye)],
-                 [  0,   0,   0,           1]])
-
-            fovx = self.fovx
-            aspect = self.aspect
-            near = self.near
-            far = self.far
-
-            fov_tan_inv = 1 / np.tan(fovx / 2)
-            a = fov_tan_inv
-            b = aspect * fov_tan_inv
-            c = -(far + near) / (far - near)
-            d = -2 * far * near / (far - near)
-            proj = Matrix44(
-                [[a, 0,  0, 0],
-                 [0, b,  0, 0],
-                 [0, 0,  c, d],
-                 [0, 0, -1, 0]])
-
-            self._view_proj = proj * view
-
-        return self._view_proj
+        self.update()
 
     def update(self):
-        self._view_proj = None
+        eye = self.eye
+        at = self.at
+        up = self.up
+
+        n = (eye - at).normalised
+        u = up.cross(n).normalised
+        v = n.cross(u)
+        self.view = Matrix44(
+            [[u.x, u.y, u.z, -u.dot(eye)],
+             [v.x, v.y, v.z, -v.dot(eye)],
+             [n.x, n.y, n.z, -n.dot(eye)],
+             [  0,   0,   0,           1]])
+
+        fovx = self.fovx
+        aspect = self.aspect
+        near = self.near
+        far = self.far
+
+        inv_tan_fov = 1 / np.tan(fovx / 2)
+        a = inv_tan_fov
+        b = aspect * inv_tan_fov
+        c = -(far + near) / (far - near)
+        d = -2 * far * near / (far - near)
+        self.proj = Matrix44(
+            [[a, 0,  0, 0],
+             [0, b,  0, 0],
+             [0, 0,  c, d],
+             [0, 0, -1, 0]])
 
 def print_gl_version():
         version_str = str(glGetString(GL_VERSION), 'utf-8')
