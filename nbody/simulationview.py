@@ -132,6 +132,11 @@ class SimulationView(QOpenGLWidget):
         t = time.time()
         dt = t - self.last_update_time
 
+        # TODO: separate update and draw loops
+        # can have one loop that just updates as fast as possible
+        # another loop does drawing
+        # draw loop pauses update loop very briefly just to copy data,
+        # then lets update loop continue and uses copied data to draw
         self.sim.update(dt)
 
         super().update()
@@ -145,10 +150,10 @@ class SimulationView(QOpenGLWidget):
         glUseProgram(self.shader)
         glBindVertexArray(self.vao)
 
-        for i, particle in enumerate(sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
-            d = self.particle_data[i]
-            d['radius'] = particle.radius
-            d['position'] = particle.position
+        # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
+        for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
+            data['radius'] = particle.radius
+            data['position'] = particle.position
 
         with self.particle_data_vbo:
             self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
@@ -184,7 +189,8 @@ class SimulationView(QOpenGLWidget):
 
     def _gen_sprite_img(self):
         resolution = 64
-        ramp_pwr = -1.5
+        # ramp_pwr = -1.5
+        ramp_pwr = 5
 
         img = np.zeros((resolution, resolution), dtype=np.complex)
         l = np.linspace(-1, 1, resolution)
@@ -224,9 +230,9 @@ class Camera(object):
         near = self.near
         far = self.far
 
-        inv_tan_fov = 1 / np.tan(fovx / 2)
-        a = inv_tan_fov
-        b = aspect * inv_tan_fov
+        recip_tan_fov = 1 / np.tan(fovx / 2)
+        a = recip_tan_fov
+        b = aspect * recip_tan_fov
         c = -(far + near) / (far - near)
         d = -2 * far * near / (far - near)
         self.proj = Matrix44(
@@ -257,10 +263,10 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
             size = int(np.prod(dtype.shape))
             stride = data.dtype.itemsize
             offset = c_void_p(offset)
-            print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
-            print('size:', size)
-            print('stride:', stride)
-            print('offset:', offset)
+            # print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
+            # print('size:', size)
+            # print('stride:', stride)
+            # print('offset:', offset)
             glEnableVertexAttribArray(loc)
             glVertexAttribPointer(
                 index=loc,

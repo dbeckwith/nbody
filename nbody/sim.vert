@@ -18,6 +18,6 @@ void main() {
     vec3 cam_up    = vec3(view[0][1], view[1][1], view[2][1]);
 
     vec3 vert = (sprite_vertex.x * cam_right + sprite_vertex.y * cam_up);
-    vert *= particle_radius;
+    vert *= particle_radius * 1.0;
     gl_Position = proj * view * vec4(vert + particle_position, 1.0);
 }

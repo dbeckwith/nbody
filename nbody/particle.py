@@ -42,21 +42,23 @@ class Particle(object):
             self.mass,
             self.radius)
 
-    def __add__(self, other):
-        p = Particle()
-        p.mass = self.mass + other.mass
-        p.position = (self.position * self.mass + other.position * other.mass) / (self.mass + other.mass)
-        p.momentum = (self.momentum + other.momentum) / 2
-        p.density = (self.density + other.density) / 2
-        return p
-
-    def __iadd__(self, other):
-        p = self + other
-        self.mass = p.mass
-        self.position = p.position
-        self.momentum = p.momentum
-        self.density = p.density
-        return self
+    @staticmethod
+    def sum(particles):
+        mass = 0
+        momentum = Vector3()
+        volume = 0
+        for p in particles:
+            mass += p.mass
+            volume += p.volume
+            momentum += p.momentum
+        momentum /= len(particles)
+        
+        s = Particle()
+        s.mass = mass
+        s.momentum = momentum
+        s.volume = volume
+        s.position = sum(p.mass * p.position for p in particles) / mass
+        return s
 
     def __repr__(self):
         return 'Particle(' + \
