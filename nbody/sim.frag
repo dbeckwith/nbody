@@ -28,5 +28,5 @@ void main() {
         hue = length(frag_velocity) * 0.05;
     }
     color = vec4(hsv2rgb(vec3(hue, 1.0, 1.0)), alpha);
-    // color = vec4(uv, 0.0, 1.0);
+    // color = vec4(frag_uv, 0.0, 1.0);
 }

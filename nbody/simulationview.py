@@ -19,8 +19,8 @@ from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtWidgets import QOpenGLWidget
 
 from .sim import NBodySimulation
+from .profiler import Profiler
 from . import util
-from .util import UpdateTimer
 
 
 class SimulationView(QOpenGLWidget):
@@ -43,7 +43,7 @@ class SimulationView(QOpenGLWidget):
 
         self.sim = NBodySimulation()
 
-        self.fps_timer = UpdateTimer(1.0, lambda fps: print('FPS: {:.1f}'.format(fps)))
+        self.profiler = Profiler(1.0, stages=['update', 'render'])
 
     def sizeHint(self):
         return self.size
@@ -106,6 +106,9 @@ class SimulationView(QOpenGLWidget):
             shader=self.shader,
             attr_prefix='particle_',
             divisor=1)
+        # set data format to be agreeable with __setitem__
+        # with self.particle_data_vbo:
+        #     self.particle_data_vbo.set_array(np.empty((len(self.particle_data) * self.particle_data.dtype.itemsize // np.array([], dtype=np.float32).itemsize,), dtype=np.float32))
 
         glBindVertexArray(0)
         glUseProgram(0)
@@ -121,11 +124,15 @@ class SimulationView(QOpenGLWidget):
         dt = t - self.last_update_time
         self.last_update_time = t
 
+        self.profiler.stage('update')
         self.sim.update(dt)
+        self.profiler.end_stage()
 
         super().update()
 
     def paintGL(self):
+        self.profiler.stage('render')
+
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
@@ -136,10 +143,12 @@ class SimulationView(QOpenGLWidget):
         glUseProgram(self.shader)
         glBindVertexArray(self.particles_vao)
 
+        self.profiler.stage('render.camera')
         self.camera.update()
         glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
         glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
 
+        self.profiler.stage('render.particles.data')
         # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
         for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
             data['radius'] = particle.radius
@@ -147,15 +156,23 @@ class SimulationView(QOpenGLWidget):
             data['position'] = particle.position
             data['velocity'] = particle.velocity
 
+        self.profiler.stage('render.particles.copy')
+        # self.particle_data_vbo.copied = False
         with self.particle_data_vbo:
+            # TODO: bottleneck is set_array
+            # need to use __setitem__, but need to get data in right format
+            # self.particle_data_vbo[:len(self.sim.particles) * self.particle_data.dtype.itemsize // np.array([], dtype=np.float32).itemsize] = self.particle_data[:len(self.sim.particles)].view(np.float32)
             self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
+            self.particle_data_vbo.copy_data()
 
+        self.profiler.stage('render.particles.draw')
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
+        self.profiler.end_stage()
 
         glBindVertexArray(0)
         glUseProgram(0)
 
-        self.fps_timer.update()
+        self.profiler.update()
 
     def resizeGL(self, width, height):
         self.size = QSize(width, height)
@@ -271,6 +288,9 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
         for prop, (dtype, offset) in data.dtype.fields.items():
             prop = attr_prefix + prop
             loc = glGetAttribLocation(shader, prop)
+            if loc == -1:
+                print('WARNING: shader variable {:s} not found'.format(prop))
+                continue
             size = int(np.prod(dtype.shape))
             stride = data.dtype.itemsize
             offset = ctypes.c_void_p(offset)
@@ -287,5 +307,5 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
                 stride=stride,
                 pointer=offset)
             glVertexAttribDivisor(loc, divisor)
-        vbo.copy_data()
+        vbo.set_array(data)
     return vbo
