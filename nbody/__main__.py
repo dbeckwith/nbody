@@ -16,6 +16,12 @@ if __name__ == '__main__':
 
     app = QApplication([])
 
+    # for multisampling
+    # from PyQt5.QtGui import QSurfaceFormat
+    # fmt = QSurfaceFormat.defaultFormat()
+    # fmt.setSamples(4)
+    # QSurfaceFormat.setDefaultFormat(fmt)
+
     mw = MainWindow()
     mw.show()
 

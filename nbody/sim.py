@@ -9,10 +9,10 @@ from .particle import Particle
 
 
 # GRAVITY_CONSTANT = 6.674e-11
-GRAVITY_CONSTANT = 0.1
+GRAVITY_CONSTANT = 100
 
 class NBodySimulation(object):
-    collision_overlap = 0.5
+    collision_overlap = 0.25
 
     def __init__(self):
         self.particles = set()
@@ -30,7 +30,7 @@ class NBodySimulation(object):
 
         collisions = list()
         for p1, p2 in itertools.combinations(self.particles, 2):
-            if (p2.position - p1.position).squared_length <= (p1.radius + p2.radius) ** 2 * (1 - self.collision_overlap):
+            if (p2.position - p1.position).squared_length <= ((p1.radius + p2.radius) * (1 - self.collision_overlap)) ** 2:
                 found_group = False
                 for group in collisions:
                     if p1 in group:

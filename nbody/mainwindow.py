@@ -22,7 +22,7 @@ class MainWindow(QMainWindow):
             r1, r2, r3 = np.random.rand(3)
             r1 *= 2 * np.pi
             r2_sqrt = 2 * np.sqrt(r2 * (1 - r2))
-            r3 *= 10
+            r3 *= 100
             px = r3 * np.cos(r1) * r2_sqrt
             py = r3 * np.sin(r1) * r2_sqrt
             pz = r3 * (1 - 2 * r2)
@@ -30,8 +30,8 @@ class MainWindow(QMainWindow):
             p = Particle(
                 position=Vector3([px, py, pz]),
                 velocity=Vector3(),
-                mass=1,
-                radius=0.1)
+                mass=1.0,
+                radius=1.0)
             self.sim_view.sim.particles.add(p)
 
         self.setCentralWidget(self.sim_view)

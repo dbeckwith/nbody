@@ -32,13 +32,13 @@ class SimulationView(QOpenGLWidget):
         self.size = QSize(800, 500)
 
         self.camera = Camera(
-            eye=Vector3([0.0, 0.0, 10.0]),
+            eye=Vector3([0.0, 0.0, 100.0]),
             at=Vector3([0.0, 0.0, 0.0]),
             up=Vector3([0.0, 1.0, 0.0]),
             fovx=np.deg2rad(90.0),
             aspect=self.size.width() / self.size.height(),
             near=0.01,
-            far=100.0)
+            far=1000.0)
 
         self.sim = NBodySimulation()
 
@@ -70,6 +70,9 @@ class SimulationView(QOpenGLWidget):
         self.view_loc = glGetUniformLocation(self.shader, 'view')
         self.proj_loc = glGetUniformLocation(self.shader, 'proj')
 
+        glUniform1f(glGetUniformLocation(self.shader, 'collision_overlap'), self.sim.collision_overlap)
+        glUniform1ui(glGetUniformLocation(self.shader, 'color_mode'), 1)
+
         self.vao = glGenVertexArrays(1)
         glBindVertexArray(self.vao)
 
@@ -88,32 +91,13 @@ class SimulationView(QOpenGLWidget):
             shader=self.shader,
             attr_prefix='sprite_')
 
-        sprite_img = self._gen_sprite_img()
-        self.sprite_texture = glGenTextures(1)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, self.sprite_texture)
-        glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            GL_RED,
-            sprite_img.shape[0],
-            sprite_img.shape[1],
-            0,
-            GL_RED,
-            GL_FLOAT,
-            sprite_img)
-        glUniform1i(glGetUniformLocation(self.shader, 'tex'), 0)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glBindTexture(GL_TEXTURE_2D, 0)
-
         self.particle_data = np.empty(
             (self.max_particles,),
             dtype=np.dtype([
                 ('radius', np.float32),
-                ('position', np.float32, 3)]))
+                ('mass', np.float32),
+                ('position', np.float32, 3),
+                ('velocity', np.float32, 3)]))
         self.particle_data_vbo = make_vbo(
             data=self.particle_data,
             usage='GL_STREAM_DRAW',
@@ -144,22 +128,24 @@ class SimulationView(QOpenGLWidget):
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
+        # TODO: try to get multisampling working
+        # glEnable(GL_MULTISAMPLE)
+        # print(glGetIntegerv(GL_SAMPLES), glGetIntegerv(GL_SAMPLE_BUFFERS))
+
         glUseProgram(self.shader)
         glBindVertexArray(self.vao)
 
         # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
         for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
             data['radius'] = particle.radius
+            data['mass'] = particle.mass
             data['position'] = particle.position
+            data['velocity'] = particle.velocity
 
         with self.particle_data_vbo:
             self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
 
-        glBindTexture(GL_TEXTURE_2D, self.sprite_texture)
-
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
-
-        glBindTexture(GL_TEXTURE_2D, 0)
 
         glBindVertexArray(0)
         glUseProgram(0)
@@ -185,18 +171,6 @@ class SimulationView(QOpenGLWidget):
 
     def _particle_sort(self, particle):
         return (self.camera.eye - particle.position).squared_length
-
-    def _gen_sprite_img(self):
-        resolution = 64
-        # ramp_pwr = -1.5
-        ramp_pwr = 5
-
-        img = np.zeros((resolution, resolution), dtype=np.complex)
-        l = np.linspace(-1, 1, resolution)
-        img.real, img.imag = np.meshgrid(l, l)
-        img = np.abs(img) ** (2 ** ramp_pwr)
-        img = 1 - img
-        return img.astype(np.float32)
 
 class Camera(object):
     def __init__(self, eye, at, up, fovx, aspect, near, far):

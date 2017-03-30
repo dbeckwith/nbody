@@ -47,17 +47,19 @@ class Particle(object):
         mass = 0
         momentum = Vector3()
         volume = 0
+        position_sum = Vector3()
         for p in particles:
             mass += p.mass
-            volume += p.volume
             momentum += p.momentum
+            volume += p.volume
+            position_sum += p.mass * p.position
         momentum /= len(particles)
         
         s = Particle()
         s.mass = mass
         s.momentum = momentum
         s.volume = volume
-        s.position = sum(p.mass * p.position for p in particles) / mass
+        s.position = position_sum / mass
         return s
 
     def __repr__(self):
