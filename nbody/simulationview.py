@@ -3,6 +3,7 @@
 import os
 import time
 import traceback
+import ctypes
 
 import numpy as np
 from pyrr import Vector3, Vector4, Matrix44
@@ -13,16 +14,17 @@ OpenGL.FULL_LOGGING = True
 from OpenGL.GL import *
 from OpenGL.GL import shaders
 from OpenGL.arrays.vbo import VBO
-from ctypes import c_void_p
 
 from PyQt5.QtCore import QSize, QTimer
 from PyQt5.QtWidgets import QOpenGLWidget
 
 from .sim import NBodySimulation
+from .util import UpdateTimer
 
 
 class SimulationView(QOpenGLWidget):
     max_particles = 256
+    fps = 60
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -39,6 +41,8 @@ class SimulationView(QOpenGLWidget):
             far=100.0)
 
         self.sim = NBodySimulation()
+
+        self.fps_timer = UpdateTimer(1.0, lambda fps: print('FPS: {:.1f}'.format(fps)))
 
     def sizeHint(self):
         return self.size
@@ -121,27 +125,20 @@ class SimulationView(QOpenGLWidget):
         glBindVertexArray(0)
         glUseProgram(0)
 
-        fps = 60
-        self.last_update_time = time.time() - 1 / fps
+        self.last_update_time = time.time() - 1 / self.fps
         self.ani_timer = QTimer(self)
-        self.ani_timer.setInterval(1000 / fps)
+        self.ani_timer.setInterval(1000 / self.fps)
         self.ani_timer.timeout.connect(self.update)
         self.ani_timer.start()
 
     def update(self):
         t = time.time()
         dt = t - self.last_update_time
+        self.last_update_time = t
 
-        # TODO: separate update and draw loops
-        # can have one loop that just updates as fast as possible
-        # another loop does drawing
-        # draw loop pauses update loop very briefly just to copy data,
-        # then lets update loop continue and uses copied data to draw
         self.sim.update(dt)
 
         super().update()
-
-        self.last_update_time = t
 
     def paintGL(self):
         glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -166,6 +163,8 @@ class SimulationView(QOpenGLWidget):
 
         glBindVertexArray(0)
         glUseProgram(0)
+
+        self.fps_timer.update()
 
     def resizeGL(self, width, height):
         self.size = QSize(width, height)
@@ -262,7 +261,7 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
             loc = glGetAttribLocation(shader, prop)
             size = int(np.prod(dtype.shape))
             stride = data.dtype.itemsize
-            offset = c_void_p(offset)
+            offset = ctypes.c_void_p(offset)
             # print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
             # print('size:', size)
             # print('stride:', stride)
