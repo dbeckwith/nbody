@@ -15,10 +15,11 @@ from OpenGL.GL import *
 from OpenGL.GL import shaders
 from OpenGL.arrays.vbo import VBO
 
-from PyQt5.QtCore import QSize, QTimer
+from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtWidgets import QOpenGLWidget
 
 from .sim import NBodySimulation
+from . import util
 from .util import UpdateTimer
 
 
@@ -31,10 +32,10 @@ class SimulationView(QOpenGLWidget):
 
         self.size = QSize(800, 500)
 
-        self.camera = Camera(
-            eye=Vector3([0.0, 0.0, 100.0]),
-            at=Vector3([0.0, 0.0, 0.0]),
-            up=Vector3([0.0, 1.0, 0.0]),
+        self.camera = OrbitCamera(
+            distance=100.0,
+            azimuth=0.0,
+            zenith=np.pi / 2,
             fovx=np.deg2rad(90.0),
             aspect=self.size.width() / self.size.height(),
             near=0.01,
@@ -73,8 +74,8 @@ class SimulationView(QOpenGLWidget):
         glUniform1f(glGetUniformLocation(self.shader, 'collision_overlap'), self.sim.collision_overlap)
         glUniform1ui(glGetUniformLocation(self.shader, 'color_mode'), 1)
 
-        self.vao = glGenVertexArrays(1)
-        glBindVertexArray(self.vao)
+        self.particles_vao = glGenVertexArrays(1)
+        glBindVertexArray(self.particles_vao)
 
         self.sprite_data = np.array(
             [([-1.0,  1.0], [0.0, 1.0]),
@@ -133,7 +134,11 @@ class SimulationView(QOpenGLWidget):
         # print(glGetIntegerv(GL_SAMPLES), glGetIntegerv(GL_SAMPLE_BUFFERS))
 
         glUseProgram(self.shader)
-        glBindVertexArray(self.vao)
+        glBindVertexArray(self.particles_vao)
+
+        self.camera.update()
+        glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
+        glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
 
         # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
         for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
@@ -155,19 +160,29 @@ class SimulationView(QOpenGLWidget):
     def resizeGL(self, width, height):
         self.size = QSize(width, height)
         self.camera.aspect = self.size.width() / self.size.height()
-        self.camera_update()
 
-    def camera_update(self):
-        self.camera.update()
+    def mousePressEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            self.drag_mouse_start = event.pos()
+            self.drag_cam_start = (self.camera.azimuth, self.camera.zenith)
 
-        glUseProgram(self.shader)
-        glBindVertexArray(self.vao)
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton == Qt.LeftButton:
+            drag = event.pos() - self.drag_mouse_start
+            drag = np.array([drag.x(), -drag.y()], dtype=np.float)
+            drag = util.lerp(drag, 0, 500, 0, np.pi)
+            azimuth, zenith = self.drag_cam_start
+            azimuth += drag[0]
+            zenith += drag[1]
+            self.camera.azimuth = azimuth
+            self.camera.zenith = zenith
 
-        glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
-        glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
-
-        glBindVertexArray(0)
-        glUseProgram(0)
+    def wheelEvent(self, event):
+        scroll = event.angleDelta().y()
+        zoom = util.lerp(-scroll, 0, 120, 0, 0.25)
+        self.camera.distance = 2 ** (np.log2(self.camera.distance) + zoom)
+        self.camera.near = 2 ** (np.log2(self.camera.near) + zoom)
+        self.camera.far = 2 ** (np.log2(self.camera.far) + zoom)
 
     def _particle_sort(self, particle):
         return (self.camera.eye - particle.position).squared_length
@@ -213,6 +228,29 @@ class Camera(object):
              [0, b,  0, 0],
              [0, 0,  c, d],
              [0, 0, -1, 0]])
+
+class OrbitCamera(Camera):
+    zenith_eps = 1e-5 * np.pi
+
+    def __init__(self, distance, azimuth, zenith, fovx, aspect, near, far):
+        self.distance = distance
+        self.azimuth = azimuth
+        self.zenith = zenith
+        super().__init__(
+            Vector3(),
+            Vector3(),
+            Vector3([0.0, 1.0, 0.0]),
+            fovx,
+            aspect,
+            near,
+            far)
+
+    def update(self):
+        self.azimuth %= np.pi * 2
+        self.zenith = np.clip(self.zenith, self.zenith_eps, np.pi - self.zenith_eps)
+        eye = util.from_spherical(self.distance, self.azimuth, self.zenith)
+        self.eye = Vector3([eye.x, eye.z, eye.y])
+        super().update()
 
 def print_gl_version():
         version_str = str(glGetString(GL_VERSION), 'utf-8')
