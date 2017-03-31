@@ -56,9 +56,9 @@ class SimulationView(QOpenGLWidget):
         glBlendEquation(GL_FUNC_ADD)
 
         try:
-            with open(os.path.join(os.path.dirname(__file__), 'sim.vert'), 'r') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'particle.vert'), 'r') as f:
                 vshader = shaders.compileShader(f.read(), GL_VERTEX_SHADER)
-            with open(os.path.join(os.path.dirname(__file__), 'sim.frag'), 'r') as f:
+            with open(os.path.join(os.path.dirname(__file__), 'particle.frag'), 'r') as f:
                 fshader = shaders.compileShader(f.read(), GL_FRAGMENT_SHADER)
             self.shader = shaders.compileProgram(vshader, fshader)
         except BaseException as e:
