@@ -19,7 +19,7 @@ from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtWidgets import QOpenGLWidget
 
 from .sim import NBodySimulation
-from .profiler import Profiler
+from .profiler import PROFILER
 from . import util
 
 
@@ -42,8 +42,6 @@ class SimulationView(QOpenGLWidget):
             far=1000.0)
 
         self.sim = NBodySimulation()
-
-        self.profiler = Profiler(1.0, stages=['update', 'render'])
 
     def sizeHint(self):
         return self.size
@@ -120,18 +118,20 @@ class SimulationView(QOpenGLWidget):
         self.ani_timer.start()
 
     def update(self):
+        PROFILER.begin()
+
         t = time.time()
         dt = t - self.last_update_time
         self.last_update_time = t
 
-        self.profiler.stage('update')
+        PROFILER.begin('update')
         self.sim.update(dt)
-        self.profiler.end_stage()
+        PROFILER.end('update')
 
         super().update()
 
     def paintGL(self):
-        self.profiler.stage('render')
+        PROFILER.begin('render')
 
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -143,12 +143,12 @@ class SimulationView(QOpenGLWidget):
         glUseProgram(self.shader)
         glBindVertexArray(self.particles_vao)
 
-        self.profiler.stage('render.camera')
+        PROFILER.begin('render.camera')
         self.camera.update()
         glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
         glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
 
-        self.profiler.stage('render.particles.data')
+        PROFILER.begin('render.particles.data')
         # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
         for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
             data['radius'] = particle.radius
@@ -156,7 +156,7 @@ class SimulationView(QOpenGLWidget):
             data['position'] = particle.position
             data['velocity'] = particle.velocity
 
-        self.profiler.stage('render.particles.copy')
+        PROFILER.begin('render.particles.copy')
         # self.particle_data_vbo.copied = False
         with self.particle_data_vbo:
             # TODO: bottleneck is set_array
@@ -165,14 +165,14 @@ class SimulationView(QOpenGLWidget):
             self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
             self.particle_data_vbo.copy_data()
 
-        self.profiler.stage('render.particles.draw')
+        PROFILER.begin('render.particles.draw')
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
-        self.profiler.end_stage()
+        PROFILER.end('render.particles.draw')
 
         glBindVertexArray(0)
         glUseProgram(0)
 
-        self.profiler.update()
+        PROFILER.end()
 
     def resizeGL(self, width, height):
         self.size = QSize(width, height)

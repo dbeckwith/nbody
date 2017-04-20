@@ -1,104 +1,152 @@
 # -*- coding: utf-8 -*-
 
+import sys
 import time
+from datetime import timedelta
+import atexit
 
 import numpy as np
 
 
 class Profiler(object):
-    def __init__(self, print_interval=None, max_samples=1000, stages=[]):
-        self.print_interval = print_interval
-        if self.print_interval is not None:
-            self.print_timer = time.time()
+    stage_name_separator = '.'
+    debug = False
+
+    def __init__(self):
+        self._root_stage = Stage('<root>', None)
+        self._curr_stage_name = None
+
+    def begin(self, stage_name=''):
+        if self.debug:
+            print('-'*80)
+            print('begin', stage_name)
+        t = time.time()
+        stage_name = self._split_name(stage_name)
+
+        self._end(t, stage_name)
+
+        stage = self._root_stage
+        add_begin = False
+        for i, part in enumerate(stage_name):
+            if self.debug: print(part)
+            if i > 0:
+                stage = stage.get_sub_stage(part)
+            if not add_begin and not (self._curr_stage_name and i < len(self._curr_stage_name) and part == self._curr_stage_name[i]):
+                add_begin = True
+            if add_begin:
+                if self.debug: print(stage.name + '.add_begin')
+                stage.add_begin(t)
+
+        self._curr_stage_name = stage_name
+
+    def _end(self, t, stage_name):
+        ended_count = 0
+        if self._curr_stage_name:
+            stage = self._root_stage
+            add_end = False
+            for i, part in enumerate(self._curr_stage_name):
+                if self.debug: print(part)
+                if i > 0:
+                    stage = stage.get_sub_stage(part)
+                if not add_end and not (stage_name and i < len(stage_name) and part == stage_name[i]):
+                    add_end = True
+                if add_end:
+                    if self.debug: print(stage.name + '.add_end')
+                    stage.add_end(t)
+                    ended_count += 1
+        return ended_count
+
+    def end(self, stage_name=''):
+        if self.debug:
+            print('-'*80)
+            print('end', stage_name)
+        t = time.time()
+        stage_name = self._split_name(stage_name)
+        ended_count = self._end(t, stage_name[:-1])
+        self._curr_stage_name = self._curr_stage_name[:-ended_count]
+        if self.debug: print('new curr stage name:', self._curr_stage_name)
+
+    def _split_name(self, name):
+        if not name:
+            return [self._root_stage.name]
         else:
-            self.print_timer = None
-        self.max_samples = max_samples
-        self.ups_sampler = ValueSampler(self.max_samples)
-        self.timer = None
-        self.stages = {}
-        self.stages_order = []
-        self.curr_stage = None
-        for stage_name in stages:
-            self.stages_order.append(stage_name)
-            self.stages[stage_name] = ProfilerStage(self.max_samples)
+            return [self._root_stage.name] + name.split(self.stage_name_separator)
 
-    def stage(self, stage_name):
-        # TODO: support hierarchical stage names
-        # i.e. render should show total render time with render.camera and render.copy separate
-        t = time.time()
-        if self.curr_stage is not None:
-            self.curr_stage.end_time = t
-        if stage_name not in self.stages:
-            self.stages_order.append(stage_name)
-            self.stages[stage_name] = ProfilerStage(self.max_samples)
-        self.curr_stage = self.stages[stage_name]
-        self.curr_stage.start_time = t
+    def print_stages(self):
+        self._root_stage.print_stages()
 
-    def end_stage(self):
-        t = time.time()
-        if self.curr_stage is not None:
-            self.curr_stage.end_time = t
+class Stage(object):
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+        self._begin_times = []
+        self._end_times = []
+        self._sub_stage_order = []
+        self._sub_stage_names = {}
+        self._avg_time = None
 
-    def update(self):
-        t = time.time()
-        if self.timer is None:
-            self.timer = t
-            return
-        dt = t - self.timer
-        self.timer = t
-        ups = 1 / dt
+    def add_begin(self, t):
+        self._begin_times.append(t)
+        self._avg_time = None
 
-        self.ups_sampler.add_sample(ups)
+    def add_end(self, t):
+        self._end_times.append(t)
+        self._avg_time = None
 
-        if self.curr_stage is not None:
-            self.curr_stage.end_time = t
-        for stage in self.stages.values():
-            stage.update(dt)
-
-        if self.print_timer is not None and t - self.print_timer >= self.print_interval:
-            self.print_timer = t
-            ups = self.ups_sampler.capture_value()
-            avg_time = 1 / ups
-            if self.stages:
-                print('[PROFILER]', '='*80)
-                for stage_name in self.stages_order:
-                    stage = self.stages[stage_name]
-                    proportion = stage.time_sampler.capture_value()
-                    print('[PROFILER]', '{:s}: {:.1%} ({:.3f}ms)'.format(stage_name, proportion, proportion * avg_time * 1000))
-            print('[PROFILER]', 'Total UPS: {:.1f} ({:.3f}ms)'.format(ups, avg_time * 1000))
-
-class ProfilerStage(object):
-    def __init__(self, max_samples):
-        self.time_sampler = ValueSampler(max_samples)
-        self.start_time = None
-        self.end_time = None
-
-    def update(self, total_time):
-        self.time_sampler.add_sample((self.end_time - self.start_time) / total_time)
-        self.start_time = None
-        self.end_time = None
-
-class ValueSampler(object):
-    def __init__(self, max_samples):
-        self.max_samples = max_samples
-        self.samples = np.empty((self.max_samples,), dtype=np.float32)
-        self.num_samples = 0
-        self.sample_pos = 0
-
-    def add_sample(self, sample):
-        self.num_samples += 1
-        self.num_samples = min(self.num_samples, self.max_samples)
-
-        self.samples[self.sample_pos] = sample
-
-        self.sample_pos += 1
-        self.sample_pos %= self.max_samples
-
-    def capture_value(self):
-        if self.num_samples == self.max_samples:
-            value = np.mean(self.samples)
+    def get_sub_stage(self, name):
+        if name not in self._sub_stage_names:
+            stage = Stage(name, self)
+            self._sub_stage_names[name] = stage
+            self._sub_stage_order.append(stage)
+            return stage
         else:
-            value = np.mean(self.samples[:self.num_samples])
-        self.num_samples = 0
-        self.sample_pos = 0
-        return value
+            return self._sub_stage_names[name]
+
+    @property
+    def sub_stages(self):
+        yield from self._sub_stage_order
+
+    @property
+    def avg_time(self):
+        if self._avg_time is None:
+            samples = min(len(self._end_times), len(self._begin_times))
+            self._avg_time = np.mean(np.array(self._end_times)[:samples] - np.array(self._begin_times)[:samples])
+        return self._avg_time
+
+    def print_stages(self, depth=0):
+        for _ in range(depth):
+            sys.stdout.write('\t')
+        sys.stdout.write('total' if self.parent is None else self.name)
+        sys.stdout.write(': ')
+        sys.stdout.write(str(timedelta(seconds=self.avg_time)))
+        if self.parent is not None:
+            sys.stdout.write(' ({:%} of parent'.format(self.avg_time / self.parent.avg_time))
+            if self.parent.parent is not None:
+                root = self
+                while root.parent is not None:
+                    root = root.parent
+                sys.stdout.write(', {:%} of total'.format(self.avg_time / root.avg_time))
+            sys.stdout.write(')')
+        sys.stdout.write('\n')
+        for sub_stage in self.sub_stages:
+            sub_stage.print_stages(depth + 1)
+
+PROFILER = Profiler()
+atexit.register(PROFILER.print_stages)
+
+
+if __name__ == '__main__':
+    PROFILER.debug = True
+
+    for _ in range(2):
+        print('='*80)
+        PROFILER.begin()
+        PROFILER.begin('update')
+        PROFILER.end('update')
+        PROFILER.begin('render')
+        PROFILER.begin('render.camera')
+        PROFILER.begin('render.particles.data')
+        PROFILER.begin('render.particles.copy')
+        PROFILER.begin('render.particles.draw')
+        PROFILER.end('render.particles.draw')
+        PROFILER.end()
