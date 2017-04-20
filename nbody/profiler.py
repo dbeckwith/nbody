@@ -124,15 +124,15 @@ class Stage(object):
         sys.stdout.write(': ')
         sys.stdout.write(_format_time(self.avg_time))
         if self.parent is not None:
-            sys.stdout.write(' ({:5.2%} of {:s}'.format(self.avg_time / self.parent.avg_time, self.parent.name))
+            sys.stdout.write(' ({:.2%} of {:s}'.format(self.avg_time / self.parent.avg_time, self.parent.name))
             if self.parent.parent is not None:
                 root = self
                 while root.parent is not None:
                     root = root.parent
-                sys.stdout.write(', {:5.2%} of {:s}'.format(self.avg_time / root.avg_time, root.name))
+                sys.stdout.write(', {:.2%} of {:s}'.format(self.avg_time / root.avg_time, root.name))
             sys.stdout.write(')')
         else:
-            sys.stdout.write(' ({:f} UPS)'.format(1 / self.avg_time))
+            sys.stdout.write(' ({:.3g} UPS)'.format(1 / self.avg_time))
         sys.stdout.write('\n')
         for sub_stage in self.sub_stages:
             sub_stage.print_stages(depth + 1)

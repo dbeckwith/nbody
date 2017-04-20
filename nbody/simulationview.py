@@ -13,7 +13,6 @@ OpenGL.ERROR_CHECKING = True
 OpenGL.FULL_LOGGING = True
 from OpenGL.GL import *
 from OpenGL.GL import shaders
-from OpenGL.arrays.vbo import VBO
 
 from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtWidgets import QOpenGLWidget
@@ -85,8 +84,8 @@ class SimulationView(QOpenGLWidget):
                 ('uv', np.float32, 2)]))
         self.sprite_data_vbo = make_vbo(
             data=self.sprite_data,
-            usage='GL_STATIC_DRAW',
-            target='GL_ARRAY_BUFFER',
+            usage=GL_STATIC_DRAW,
+            target=GL_ARRAY_BUFFER,
             shader=self.shader,
             attr_prefix='sprite_')
 
@@ -99,14 +98,11 @@ class SimulationView(QOpenGLWidget):
                 ('velocity', np.float32, 3)]))
         self.particle_data_vbo = make_vbo(
             data=self.particle_data,
-            usage='GL_STREAM_DRAW',
-            target='GL_ARRAY_BUFFER',
+            usage=GL_DYNAMIC_DRAW,
+            target=GL_ARRAY_BUFFER,
             shader=self.shader,
             attr_prefix='particle_',
             divisor=1)
-        # set data format to be agreeable with __setitem__
-        # with self.particle_data_vbo:
-        #     self.particle_data_vbo.set_array(np.empty((len(self.particle_data) * self.particle_data.dtype.itemsize // np.array([], dtype=np.float32).itemsize,), dtype=np.float32))
 
         glBindVertexArray(0)
         glUseProgram(0)
@@ -157,13 +153,8 @@ class SimulationView(QOpenGLWidget):
             data['velocity'] = particle.velocity
 
         PROFILER.begin('render.particles.copy')
-        # self.particle_data_vbo.copied = False
         with self.particle_data_vbo:
-            # TODO: bottleneck is set_array
-            # need to use __setitem__, but need to get data in right format
-            # self.particle_data_vbo[:len(self.sim.particles) * self.particle_data.dtype.itemsize // np.array([], dtype=np.float32).itemsize] = self.particle_data[:len(self.sim.particles)].view(np.float32)
-            self.particle_data_vbo.set_array(self.particle_data[:len(self.sim.particles)])
-            self.particle_data_vbo.copy_data()
+            self.particle_data_vbo.update(self.particle_data[:len(self.sim.particles)])
 
         PROFILER.begin('render.particles.draw')
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
@@ -282,8 +273,38 @@ def print_gl_version():
         #     print(str(glGetStringi(GL_SHADING_LANGUAGE_VERSION, i), 'utf-8'))
         # print()
 
+class VBO(object):
+    def __init__(self, usage, target):
+        self.usage = usage
+        self.target = target
+        self._buf_id = glGenBuffers(1)
+        self._buf_inited = False
+
+    def update(self, data):
+        if not self._buf_inited:
+            glBufferData(
+                target=self.target,
+                size=data.nbytes,
+                data=data,
+                usage=self.usage)
+            self._buf_inited = True
+        else:
+            glBufferSubData(
+                target=self.target,
+                offset=0,
+                size=data.nbytes,
+                data=data)
+
+    def __enter__(self):
+        glBindBuffer(self.target, self._buf_id)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        glBindBuffer(self.target, 0)
+
+        return False
+
 def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
-    vbo = VBO(data, usage, target)
+    vbo = VBO(usage, target)
     with vbo:
         for prop, (dtype, offset) in data.dtype.fields.items():
             prop = attr_prefix + prop
@@ -307,5 +328,5 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
                 stride=stride,
                 pointer=offset)
             glVertexAttribDivisor(loc, divisor)
-        vbo.set_array(data)
+        vbo.update(data)
     return vbo
