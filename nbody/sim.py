@@ -19,20 +19,24 @@ class NBodySimulation(object):
         self.particles = set()
 
     def update(self, dt):
+        PROFILER.begin('update')
+
         for p in self.particles:
             p.acceleration = Vector3()
+
         PROFILER.begin('update.acc_calc')
         for p1, p2 in itertools.permutations(self.particles, 2):
             dpos = p2.position - p1.position
             dpos_len_sq = dpos.squared_length
             p1.acceleration += p2.mass / (dpos_len_sq * np.sqrt(dpos_len_sq)) * dpos
+
         PROFILER.begin('update.acc_apply')
         for p in self.particles:
             p.acceleration *= GRAVITY_CONSTANT
             p.velocity += p.acceleration * dt
             p.position += p.velocity * dt
 
-        PROFILER.begin('update.collisions')
+        PROFILER.begin('update.collisions.group')
         collisions = list()
         for p1, p2 in itertools.combinations(self.particles, 2):
             if (p2.position - p1.position).squared_length <= ((p1.radius + p2.radius) * (1 - self.collision_overlap)) ** 2:
@@ -48,6 +52,10 @@ class NBodySimulation(object):
                         break
                 if not found_group:
                     collisions.append({p1, p2})
+
+        PROFILER.begin('update.collisions.combine')
         for group in collisions:
             self.particles -= group
             self.particles.add(Particle.sum(group))
+
+        PROFILER.end('update')

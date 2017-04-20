@@ -2,7 +2,6 @@
 
 import sys
 import time
-from datetime import timedelta
 import atexit
 
 import numpy as np
@@ -13,7 +12,7 @@ class Profiler(object):
     debug = False
 
     def __init__(self):
-        self._root_stage = Stage('<root>', None)
+        self._root_stage = Stage('total', None)
         self._curr_stage_name = None
 
     def begin(self, stage_name=''):
@@ -73,7 +72,8 @@ class Profiler(object):
             return [self._root_stage.name] + name.split(self.stage_name_separator)
 
     def print_stages(self):
-        self._root_stage.print_stages()
+        if self._root_stage.used:
+            self._root_stage.print_stages()
 
 class Stage(object):
     def __init__(self, name, parent):
@@ -103,6 +103,10 @@ class Stage(object):
             return self._sub_stage_names[name]
 
     @property
+    def used(self):
+        return self._begin_times and self._end_times
+
+    @property
     def sub_stages(self):
         yield from self._sub_stage_order
 
@@ -116,20 +120,43 @@ class Stage(object):
     def print_stages(self, depth=0):
         for _ in range(depth):
             sys.stdout.write('\t')
-        sys.stdout.write('total' if self.parent is None else self.name)
+        sys.stdout.write(self.name)
         sys.stdout.write(': ')
-        sys.stdout.write(str(timedelta(seconds=self.avg_time)))
+        sys.stdout.write(_format_time(self.avg_time))
         if self.parent is not None:
-            sys.stdout.write(' ({:%} of parent'.format(self.avg_time / self.parent.avg_time))
+            sys.stdout.write(' ({:5.2%} of {:s}'.format(self.avg_time / self.parent.avg_time, self.parent.name))
             if self.parent.parent is not None:
                 root = self
                 while root.parent is not None:
                     root = root.parent
-                sys.stdout.write(', {:%} of total'.format(self.avg_time / root.avg_time))
+                sys.stdout.write(', {:5.2%} of {:s}'.format(self.avg_time / root.avg_time, root.name))
             sys.stdout.write(')')
+        else:
+            sys.stdout.write(' ({:f} UPS)'.format(1 / self.avg_time))
         sys.stdout.write('\n')
         for sub_stage in self.sub_stages:
             sub_stage.print_stages(depth + 1)
+
+def _format_time(t):
+    t, micros = divmod(int(t * 1000000), 1000000)
+    t, secs = divmod(t, 60)
+    t, mins = divmod(t, 60)
+    hours = int(t)
+    s = ''
+    show = False
+    if show or hours:
+        show = True
+        s += '{:d}h '.format(hours)
+    if show or mins:
+        show = True
+        s += '{:d}m '.format(mins)
+    if show or secs:
+        show = True
+        s += '{:d}s '.format(secs)
+    if show or micros:
+        show = True
+        s += '{:.3f}ms'.format(micros / 1000)
+    return s
 
 PROFILER = Profiler()
 atexit.register(PROFILER.print_stages)

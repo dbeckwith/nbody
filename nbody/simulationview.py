@@ -124,11 +124,11 @@ class SimulationView(QOpenGLWidget):
         dt = t - self.last_update_time
         self.last_update_time = t
 
-        PROFILER.begin('update')
         self.sim.update(dt)
-        PROFILER.end('update')
 
         super().update()
+
+        PROFILER.end()
 
     def paintGL(self):
         PROFILER.begin('render')
@@ -172,7 +172,7 @@ class SimulationView(QOpenGLWidget):
         glBindVertexArray(0)
         glUseProgram(0)
 
-        PROFILER.end()
+        PROFILER.end('render')
 
     def resizeGL(self, width, height):
         self.size = QSize(width, height)
