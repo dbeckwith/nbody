@@ -2,7 +2,6 @@
 
 import sys
 import time
-import atexit
 
 import numpy as np
 
@@ -65,32 +64,60 @@ class Profiler(object):
         self._curr_stage_name = self._curr_stage_name[:-ended_count]
         if self.debug: print('new curr stage name:', self._curr_stage_name)
 
+        if stage_name == [self._root_stage.name]:
+            if all(stage.has_new_times for stage in self._root_stage.iter_preorder()):
+                for stage in self._root_stage.iter_preorder():
+                    stage.commit()
+
     def _split_name(self, name):
         if not name:
             return [self._root_stage.name]
         else:
             return [self._root_stage.name] + name.split(self.stage_name_separator)
 
-    def print_stages(self):
+    def print_stages(self, *args, **kwargs):
         if self._root_stage.used:
-            self._root_stage.print_stages()
+            self._root_stage.print_stages(*args, **kwargs)
+
+    def reset(self):
+        if self._root_stage.used:
+            for stage in self._root_stage.iter_preorder():
+                stage.reset()
 
 class Stage(object):
     def __init__(self, name, parent):
         self.name = name
         self.parent = parent
-        self._begin_times = []
-        self._end_times = []
+
         self._sub_stage_order = []
         self._sub_stage_names = {}
-        self._avg_time = None
+
+        self.reset()
 
     def add_begin(self, t):
-        self._begin_times.append(t)
-        self._avg_time = None
+        self._new_begin_time = t
 
     def add_end(self, t):
-        self._end_times.append(t)
+        self._new_end_time = t
+
+    @property
+    def has_new_times(self):
+        return self._new_begin_time is not None and self._new_end_time is not None
+
+    def commit(self):
+        self._begin_times.append(self._new_begin_time)
+        self._end_times.append(self._new_end_time)
+        self._new_begin_time = None
+        self._new_end_time = None
+        self._avg_time = None
+
+    def reset(self):
+        self._begin_times = []
+        self._new_begin_time = None
+
+        self._end_times = []
+        self._new_end_time = None
+
         self._avg_time = None
 
     def get_sub_stage(self, name):
@@ -113,29 +140,33 @@ class Stage(object):
     @property
     def avg_time(self):
         if self._avg_time is None:
-            samples = min(len(self._end_times), len(self._begin_times))
-            self._avg_time = np.mean(np.array(self._end_times)[:samples] - np.array(self._begin_times)[:samples])
+            self._avg_time = np.mean(np.array(self._end_times) - np.array(self._begin_times))
         return self._avg_time
 
-    def print_stages(self, depth=0):
+    def print_stages(self, file=sys.stdout, depth=0):
         for _ in range(depth):
-            sys.stdout.write('\t')
-        sys.stdout.write(self.name)
-        sys.stdout.write(': ')
-        sys.stdout.write(_format_time(self.avg_time))
+            file.write('\t')
+        file.write(self.name)
+        file.write(': ')
+        file.write(_format_time(self.avg_time))
         if self.parent is not None:
-            sys.stdout.write(' ({:.2%} of {:s}'.format(self.avg_time / self.parent.avg_time, self.parent.name))
+            file.write(' ({:.2%} of {:s}'.format(self.avg_time / self.parent.avg_time, self.parent.name))
             if self.parent.parent is not None:
                 root = self
                 while root.parent is not None:
                     root = root.parent
-                sys.stdout.write(', {:.2%} of {:s}'.format(self.avg_time / root.avg_time, root.name))
-            sys.stdout.write(')')
+                file.write(', {:.2%} of {:s}'.format(self.avg_time / root.avg_time, root.name))
+            file.write(')')
         else:
-            sys.stdout.write(' ({:.3g} UPS)'.format(1 / self.avg_time))
-        sys.stdout.write('\n')
+            file.write(' ({:.3g} UPS)'.format(1 / self.avg_time))
+        file.write('\n')
         for sub_stage in self.sub_stages:
-            sub_stage.print_stages(depth + 1)
+            sub_stage.print_stages(file, depth + 1)
+
+    def iter_preorder(self):
+        yield self
+        for sub_stage in self.sub_stages:
+            yield from sub_stage.iter_preorder()
 
 def _format_time(t):
     t, micros = divmod(int(t * 1000000), 1000000)
@@ -159,7 +190,6 @@ def _format_time(t):
     return s
 
 PROFILER = Profiler()
-atexit.register(PROFILER.print_stages)
 
 
 if __name__ == '__main__':
@@ -177,3 +207,5 @@ if __name__ == '__main__':
         PROFILER.begin('render.particles.draw')
         PROFILER.end('render.particles.draw')
         PROFILER.end()
+
+    PROFILER.print_stages()

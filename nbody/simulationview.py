@@ -25,6 +25,7 @@ from . import util
 class SimulationView(QOpenGLWidget):
     max_particles = 256
     fps = 60
+    profiler_print_interval = 1.0
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -113,6 +114,8 @@ class SimulationView(QOpenGLWidget):
         self.ani_timer.timeout.connect(self.update)
         self.ani_timer.start()
 
+        self.last_profiler_print_time = time.time()
+
     def update(self):
         PROFILER.begin()
 
@@ -125,6 +128,11 @@ class SimulationView(QOpenGLWidget):
         super().update()
 
         PROFILER.end()
+
+        if t - self.last_profiler_print_time >= self.profiler_print_interval:
+            PROFILER.print_stages()
+            PROFILER.reset()
+            self.last_profiler_print_time = t
 
     def paintGL(self):
         PROFILER.begin('render')
