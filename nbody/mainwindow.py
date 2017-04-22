@@ -17,7 +17,7 @@ class MainWindow(QMainWindow):
         self.sim_view = SimulationView(self)
 
         np.random.seed(0xdeadbeef)
-        for _ in range(20):
+        for _ in range(100):
             # https://people.cs.kuleuven.be/~philip.dutre/GI/TotalCompendium.pdf
             r1, r2, r3 = np.random.rand(3)
             r1 *= 2 * np.pi

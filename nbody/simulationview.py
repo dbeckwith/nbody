@@ -123,6 +123,7 @@ class SimulationView(QOpenGLWidget):
         dt = t - self.last_update_time
         self.last_update_time = t
 
+        # TODO: update using compute shader
         self.sim.update(dt)
 
         super().update()
@@ -160,6 +161,7 @@ class SimulationView(QOpenGLWidget):
             data['position'] = particle.position
             data['velocity'] = particle.velocity
 
+        # TODO: faster copy with glMapBuffer: http://www.bfilipek.com/2015/01/persistent-mapped-buffers-in-opengl.html
         PROFILER.begin('render.particles.copy')
         with self.particle_data_vbo:
             self.particle_data_vbo.update(self.particle_data[:len(self.sim.particles)])
