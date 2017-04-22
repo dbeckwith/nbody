@@ -47,12 +47,16 @@ class SimulationView(QOpenGLWidget):
         return self.size
 
     def initializeGL(self):
+        print('Initializing...')
+
         print_gl_version()
 
+        print('Setting OpenGL options')
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glBlendEquation(GL_FUNC_ADD)
 
+        print('Compiling shaders')
         try:
             with open(os.path.join(os.path.dirname(__file__), 'particle.vert'), 'r') as f:
                 vshader = shaders.compileShader(f.read(), GL_VERTEX_SHADER)
@@ -66,41 +70,46 @@ class SimulationView(QOpenGLWidget):
             exit(1)
         glUseProgram(self.shader)
 
+        print('Mapping uniforms')
         self.view_loc = glGetUniformLocation(self.shader, 'view')
         self.proj_loc = glGetUniformLocation(self.shader, 'proj')
 
         glUniform1f(glGetUniformLocation(self.shader, 'collision_overlap'), self.sim.collision_overlap)
         glUniform1ui(glGetUniformLocation(self.shader, 'color_mode'), 1)
 
+        print('Generating VAO')
         self.particles_vao = glGenVertexArrays(1)
         glBindVertexArray(self.particles_vao)
 
-        self.sprite_data = np.array(
-            [([-1.0,  1.0], [0.0, 1.0]),
-             ([-1.0, -1.0], [0.0, 0.0]),
-             ([ 1.0,  1.0], [1.0, 1.0]),
-             ([ 1.0, -1.0], [1.0, 0.0])],
-            dtype=np.dtype([
-                ('vertex', np.float32, 2),
-                ('uv', np.float32, 2)]))
-        self.sprite_data_vbo = make_vbo(
-            data=self.sprite_data,
+        print('Generating sprite data VBO')
+        self.sprite_data_vbo = ConstVBO(
             usage=GL_STATIC_DRAW,
             target=GL_ARRAY_BUFFER,
+            data=np.array(
+                [([-1.0,  1.0], [0.0, 1.0]),
+                 ([-1.0, -1.0], [0.0, 0.0]),
+                 ([ 1.0,  1.0], [1.0, 1.0]),
+                 ([ 1.0, -1.0], [1.0, 0.0])],
+                dtype=np.dtype([
+                    ('vertex', np.float32, 2),
+                    ('uv', np.float32, 2)])))
+        setup_vbo_attrs(
+            vbo=self.sprite_data_vbo,
             shader=self.shader,
             attr_prefix='sprite_')
 
-        self.particle_data = np.empty(
-            (self.max_particles,),
+        print('Generating particle data VBO')
+        self.particle_data_vbo = MappedVBO(
+            usage=GL_DYNAMIC_DRAW,
+            target=GL_ARRAY_BUFFER,
             dtype=np.dtype([
                 ('radius', np.float32),
                 ('mass', np.float32),
                 ('position', np.float32, 3),
-                ('velocity', np.float32, 3)]))
-        self.particle_data_vbo = make_vbo(
-            data=self.particle_data,
-            usage=GL_DYNAMIC_DRAW,
-            target=GL_ARRAY_BUFFER,
+                ('velocity', np.float32, 3)]),
+            length=self.max_particles)
+        setup_vbo_attrs(
+            vbo=self.particle_data_vbo,        
             shader=self.shader,
             attr_prefix='particle_',
             divisor=1)
@@ -108,6 +117,7 @@ class SimulationView(QOpenGLWidget):
         glBindVertexArray(0)
         glUseProgram(0)
 
+        print('Starting animation timer')
         self.last_update_time = time.time() - 1 / self.fps
         self.ani_timer = QTimer(self)
         self.ani_timer.setInterval(1000 / self.fps)
@@ -115,6 +125,8 @@ class SimulationView(QOpenGLWidget):
         self.ani_timer.start()
 
         self.last_profiler_print_time = time.time()
+
+        print('Done initializing')
 
     def update(self):
         PROFILER.begin()
@@ -141,6 +153,10 @@ class SimulationView(QOpenGLWidget):
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
+        PROFILER.begin('render.sync')
+        gl_wait()
+        PROFILER.end('render.sync')
+
         # TODO: try to get multisampling working
         # glEnable(GL_MULTISAMPLE)
         # print(glGetIntegerv(GL_SAMPLES), glGetIntegerv(GL_SAMPLE_BUFFERS))
@@ -152,23 +168,23 @@ class SimulationView(QOpenGLWidget):
         self.camera.update()
         glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
         glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
+        PROFILER.end('render.camera')
 
         PROFILER.begin('render.particles.data')
-        # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
-        for data, particle in zip(self.particle_data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
-            data['radius'] = particle.radius
-            data['mass'] = particle.mass
-            data['position'] = particle.position
-            data['velocity'] = particle.velocity
-
-        # TODO: faster copy with glMapBuffer: http://www.bfilipek.com/2015/01/persistent-mapped-buffers-in-opengl.html
-        PROFILER.begin('render.particles.copy')
         with self.particle_data_vbo:
-            self.particle_data_vbo.update(self.particle_data[:len(self.sim.particles)])
+            # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
+            for data, particle in zip(self.particle_data_vbo.data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
+                data['radius'] = particle.radius
+                data['mass'] = particle.mass
+                data['position'] = particle.position
+                data['velocity'] = particle.velocity
+        PROFILER.end('render.particles.data')
 
         PROFILER.begin('render.particles.draw')
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, len(self.sprite_data), len(self.sim.particles))
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, self.sprite_data_vbo.length, len(self.sim.particles))
         PROFILER.end('render.particles.draw')
+
+        gl_lock()
 
         glBindVertexArray(0)
         glUseProgram(0)
@@ -288,22 +304,6 @@ class VBO(object):
         self.usage = usage
         self.target = target
         self._buf_id = glGenBuffers(1)
-        self._buf_inited = False
-
-    def update(self, data):
-        if not self._buf_inited:
-            glBufferData(
-                target=self.target,
-                size=data.nbytes,
-                data=data,
-                usage=self.usage)
-            self._buf_inited = True
-        else:
-            glBufferSubData(
-                target=self.target,
-                offset=0,
-                size=data.nbytes,
-                data=data)
 
     def __enter__(self):
         glBindBuffer(self.target, self._buf_id)
@@ -313,17 +313,63 @@ class VBO(object):
 
         return False
 
-def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
-    vbo = VBO(usage, target)
+class ConstVBO(VBO):
+    def __init__(self, usage, target, data):
+        super().__init__(usage, target)
+        self.data = data
+        self.dtype = data.dtype
+        self.length = len(data)
+
+        with self:
+            glBufferData(self.target, self.data.nbytes, self.data, self.usage)
+
+class MappedVBO(VBO):
+    # http://www.bfilipek.com/2015/01/persistent-mapped-buffers-in-opengl.html
+
+    def __init__(self, usage, target, dtype, length):
+        super().__init__(usage, target)
+        self.dtype = dtype
+        self.length = length
+        self._sync_obj = None
+
+        with self:
+            data_size = dtype.itemsize * length
+            flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT
+            glBufferStorage(self.target, data_size, None, flags)
+            ptr = glMapBufferRange(self.target, 0, data_size, flags)
+            arr_type = ctypes.c_float * (data_size // ctypes.sizeof(ctypes.c_float))
+            self.data = np.ctypeslib.as_array(arr_type.from_address(ptr))
+            self.data = self.data.view(dtype=dtype, type=np.ndarray)
+
+_gl_sync_obj = None
+
+def gl_lock():
+    global _gl_sync_obj
+
+    if _gl_sync_obj:
+        glDeleteSync(_gl_sync_obj)
+
+    _gl_sync_obj = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+
+def gl_wait():
+    global _gl_sync_obj
+
+    if _gl_sync_obj:
+        while True:
+            wait_ret = glClientWaitSync(_gl_sync_obj, GL_SYNC_FLUSH_COMMANDS_BIT, 1)
+            if wait_ret in (GL_ALREADY_SIGNALED, GL_CONDITION_SATISFIED):
+                return
+
+def setup_vbo_attrs(vbo, shader, attr_prefix, divisor=0):
     with vbo:
-        for prop, (dtype, offset) in data.dtype.fields.items():
+        for prop, (sub_dtype, offset) in vbo.dtype.fields.items():
             prop = attr_prefix + prop
             loc = glGetAttribLocation(shader, prop)
             if loc == -1:
                 print('WARNING: shader variable {:s} not found'.format(prop))
                 continue
-            size = int(np.prod(dtype.shape))
-            stride = data.dtype.itemsize
+            size = int(np.prod(sub_dtype.shape))
+            stride = vbo.dtype.itemsize
             offset = ctypes.c_void_p(offset)
             # print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
             # print('size:', size)
@@ -338,5 +384,3 @@ def make_vbo(data, usage, target, shader, attr_prefix, divisor=0):
                 stride=stride,
                 pointer=offset)
             glVertexAttribDivisor(loc, divisor)
-        vbo.update(data)
-    return vbo
