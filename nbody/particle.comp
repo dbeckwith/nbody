@@ -1,0 +1,52 @@
+#version 450 core
+
+// for now start with just doing the force calculation
+// also start with just doing it simply
+
+const float EPS2 = 1e-3;
+
+layout(local_size_x = 1) in;
+
+uniform uint num_particles;
+uniform float dt;
+
+layout(std430) buffer particles_buffer {
+    vec4 particles[];
+};
+
+layout(std430) buffer forces_buffer {
+    vec4 forces[];
+};
+
+#define PARTICLE_POS(i) (particles[(i) * 2].xyz)
+#define PARTICLE_MASS(i) (particles[(i) * 2].w)
+#define PARTICLE_VEL(i) (particles[(i) * 2 + 1].xyz)
+
+void main() {
+    uint particle_id = gl_GlobalInvocationID.x;
+
+    if (particle_id >= num_particles) return;
+
+    vec4 particle = particles[particle_id];
+    // TODO: pos is all zeroes for some reason
+    vec3 pos = particle.xyz;
+    float mass = particle.w;
+
+    vec3 acc = vec3(0.0);
+
+    uint i;
+    for (i = 0; i < num_particles; i++) {
+        if (i == particle_id) continue;
+
+        vec4 particle2 = particles[i];
+        vec3 pos2 = particle2.xyz;
+        float mass2 = particle2.w;
+
+        vec3 dpos = pos2 - pos;
+        float dist_sq = dot(dpos, dpos) + EPS2;
+        acc += (mass2 / sqrt(dist_sq * dist_sq * dist_sq)) * dpos;
+    }
+
+    forces[particle_id].xyz = pos;
+    // forces[particle_id].xyz = vec3(1e-1);
+}
