@@ -1,8 +1,5 @@
 #version 450 core
 
-// for now start with just doing the force calculation
-// also start with just doing it simply
-
 const float EPS2 = 1e-3;
 
 layout(local_size_x = 1) in;
@@ -10,11 +7,11 @@ layout(local_size_x = 1) in;
 uniform uint num_particles;
 uniform float dt;
 
-layout(std430) buffer particles_buffer {
+layout(std430, binding=0) buffer particles_buffer {
     vec4 particles[];
 };
 
-layout(std430) buffer forces_buffer {
+layout(std430, binding=1) buffer forces_buffer {
     vec4 forces[];
 };
 
@@ -28,7 +25,6 @@ void main() {
     if (particle_id >= num_particles) return;
 
     vec4 particle = particles[particle_id];
-    // TODO: pos is all zeroes for some reason
     vec3 pos = particle.xyz;
     float mass = particle.w;
 
@@ -47,6 +43,5 @@ void main() {
         acc += (mass2 / sqrt(dist_sq * dist_sq * dist_sq)) * dpos;
     }
 
-    forces[particle_id].xyz = pos;
-    // forces[particle_id].xyz = vec3(1e-1);
+    forces[particle_id].xyz = acc;
 }

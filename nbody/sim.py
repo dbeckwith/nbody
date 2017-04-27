@@ -25,7 +25,7 @@ class NBodySimulation(object):
         self.particles = list()
 
         np.random.seed(0xdeadbeef)
-        for _ in range(100):
+        for _ in range(self.max_particles):
             # https://people.cs.kuleuven.be/~philip.dutre/GI/TotalCompendium.pdf
             r1, r2, r3 = np.random.rand(3)
             r1 *= 2 * np.pi
@@ -65,10 +65,7 @@ class NBodySimulation(object):
                 ('mass', np.float32, 1)]),
             length=self.max_particles,
             flags=GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
-        glBindBufferBase(
-            self.particles_ssbo.target,
-            glGetProgramResourceIndex(self.shader, GL_SHADER_STORAGE_BLOCK, 'particles_buffer'),
-            self.particles_ssbo._buf_id)
+        glBindBufferBase(self.particles_ssbo.target, 0, self.particles_ssbo._buf_id)
 
         self.forces_ssbo = MappedBufferObject(
             target=GL_SHADER_STORAGE_BUFFER,
@@ -77,10 +74,7 @@ class NBodySimulation(object):
                 ('unused', np.float32, 1)]),
             length=self.max_particles,
             flags=GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
-        glBindBufferBase(
-            self.forces_ssbo.target,
-            glGetProgramResourceIndex(self.shader, GL_SHADER_STORAGE_BLOCK, 'forces_buffer'),
-            self.forces_ssbo._buf_id)
+        glBindBufferBase(self.forces_ssbo.target, 1, self.forces_ssbo._buf_id)
 
         glUseProgram(0)
 
@@ -99,7 +93,6 @@ class NBodySimulation(object):
 
         PROFILER.begin('update.run_shader')
         glDispatchCompute(self.max_particles // 1, 1, 1)
-        # glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
         glUseProgram(0)
 
@@ -108,8 +101,6 @@ class NBodySimulation(object):
         PROFILER.begin('update.copy_from_shader')
         for data, particle in zip(self.forces_ssbo.data, self.particles):
             particle.acceleration = Vector3(np.copy(data['acceleration']))
-
-        gl_sync()
 
         PROFILER.begin('update.acc_apply')
         for p in self.particles:
