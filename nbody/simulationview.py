@@ -28,6 +28,9 @@ class SimulationView(QOpenGLWidget):
     def __init__(self, parent):
         super().__init__(parent)
 
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus(True)
+
         self.size = QSize(800, 500)
 
         self.camera = OrbitCamera(
@@ -147,6 +150,10 @@ class SimulationView(QOpenGLWidget):
         glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
         glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
 
+        PROFILER.begin('render.sort')
+        p = self.sim.particles_ssbo.data
+        p[:] = p[np.argsort(-np.sum(np.square(p[:]['position'] - self.camera.eye), axis=1))]
+
         PROFILER.begin('render.draw')
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, self.sprite_data_vbo.length, self.sim.num_particles)
         gl_sync()
@@ -183,8 +190,9 @@ class SimulationView(QOpenGLWidget):
         self.camera.near = 2 ** (np.log2(self.camera.near) + zoom)
         self.camera.far = 2 ** (np.log2(self.camera.far) + zoom)
 
-    def _particle_sort(self, particle):
-        return (self.camera.eye - particle.position).squared_length
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space:
+            self.sim.paused = not self.sim.paused
 
 class Camera(object):
     def __init__(self, eye, at, up, fovx, aspect, near, far):

@@ -4,6 +4,16 @@ import numpy as np
 from pyrr import Vector3
 
 
+def rand_spherical(r):
+    r1, r2, r3 = np.random.random((3,))
+    r1 *= 2 * np.pi
+    r2_sqrt = 2 * np.sqrt(r2 * (1 - r2))
+    r3 *= r
+    x = r3 * np.cos(r1) * r2_sqrt
+    y = r3 * np.sin(r1) * r2_sqrt
+    z = r3 * (1 - 2 * r2)
+    return Vector3([x, y, z])
+
 def from_spherical(r, t, p):
     if not r: return Vector3()
     sin_p = np.sin(p)

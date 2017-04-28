@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import itertools
-import copy
 
 import numpy as np
 from pyrr import Vector3
@@ -10,12 +8,16 @@ from OpenGL.GL import *
 from OpenGL.GL import shaders
 
 from .profiler import PROFILER
+from . import util
 from .gl_util import *
 
 
 class NBodySimulation(object):
-    max_particles = 256
+    num_galaxies = 5
+    work_group_size = 256
+    max_particles = work_group_size * num_galaxies * 5
     collision_overlap = 0.25
+    gravity_constant = 100
 
     def __init__(self):
         print('Compiling compute shader')
@@ -39,26 +41,51 @@ class NBodySimulation(object):
             flags=GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
 
         print('Creating particles')
-        np.random.seed(0xdeadbeef)
         self.num_particles = len(self.particles_ssbo.data)
-        for particle in self.particles_ssbo.data:
-            # https://people.cs.kuleuven.be/~philip.dutre/GI/TotalCompendium.pdf
-            r1, r2, r3 = np.random.rand(3)
-            r1 *= 2 * np.pi
-            r2_sqrt = 2 * np.sqrt(r2 * (1 - r2))
-            r3 *= 100
-            px = r3 * np.cos(r1) * r2_sqrt
-            py = r3 * np.sin(r1) * r2_sqrt
-            pz = r3 * (1 - 2 * r2)
 
-            particle['position'] = [px, py, pz]
-            particle['mass'] = 1.0
-            particle['velocity'] = [0.0, 0.0, 0.0]
-            particle['radius'] = 1.0
+        particles = iter(self.particles_ssbo.data)
+        for _ in range(self.num_galaxies):
+            center_star = next(particles)
+            center_star['position'] = util.rand_spherical(100)
+            center_star['mass'] = 1e1
+            center_star['velocity'] = 0.0
+            center_star['radius'] = 5.0
+
+            for _ in range(self.num_particles // self.num_galaxies - 1):
+                star = next(particles)
+
+                star['mass'] = center_star['mass'] * 1e-5
+                star['radius'] = 0.2
+
+                pr, pt, ph = np.random.random((3,))
+                pt *= 2 * np.pi
+                ph = util.lerp(
+                    ph,
+                    0, 1,
+                    -1, 1)
+                ph *= np.exp(-pr) * center_star['radius'] / 4
+                pr = util.lerp(
+                    pr,
+                    0, 1,
+                    center_star['radius'] * 1, center_star['radius'] * 2)
+                pos = Vector3([
+                    pr * np.cos(pt),
+                    ph,
+                    pr * np.sin(pt)])
+
+                vel = np.sqrt(self.gravity_constant * (star['mass'] + center_star['mass']) / pos.length)
+                vel = vel * Vector3([-pos.z, pos.y, pos.x]).normalised
+
+                star['position'] = center_star['position'] + pos
+                star['velocity'] = vel
 
         glUseProgram(0)
 
+        self.paused = True
+
     def update(self, dt):
+        if self.paused: return
+
         PROFILER.begin('update')
 
         glUseProgram(self.shader)
@@ -69,56 +96,12 @@ class NBodySimulation(object):
 
         PROFILER.begin('update.shader')
         glBindBufferBase(self.particles_ssbo.target, 0, self.particles_ssbo._buf_id)
-        glDispatchCompute(self.max_particles // 256, 1, 1)
+        glDispatchCompute(self.max_particles // self.work_group_size, 1, 1)
         # glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
         # glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT)
 
         glUseProgram(0)
 
         gl_sync()
-
-        PROFILER.end('update')
-
-        return
-
-
-        PROFILER.begin('update')
-
-        for p in self.particles:
-            p.acceleration = Vector3()
-
-        PROFILER.begin('update.acc_calc')
-        for p1, p2 in itertools.permutations(self.particles, 2):
-            dpos = p2.position - p1.position
-            dpos_len_sq = dpos.squared_length
-            p1.acceleration += p2.mass / (dpos_len_sq * np.sqrt(dpos_len_sq)) * dpos
-
-        PROFILER.begin('update.acc_apply')
-        for p in self.particles:
-            p.acceleration *= GRAVITY_CONSTANT
-            p.velocity += p.acceleration * dt
-            p.position += p.velocity * dt
-
-        PROFILER.begin('update.collisions.group')
-        collisions = list()
-        for p1, p2 in itertools.combinations(self.particles, 2):
-            if (p2.position - p1.position).squared_length <= ((p1.radius + p2.radius) * (1 - self.collision_overlap)) ** 2:
-                found_group = False
-                for group in collisions:
-                    if p1 in group:
-                        group.add(p2)
-                        found_group = True
-                    elif p2 in group:
-                        group.add(p1)
-                        found_group = True
-                    if found_group:
-                        break
-                if not found_group:
-                    collisions.append({p1, p2})
-
-        PROFILER.begin('update.collisions.combine')
-        for group in collisions:
-            self.particles -= group
-            self.particles.add(Particle.sum(group))
 
         PROFILER.end('update')
