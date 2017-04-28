@@ -5,7 +5,7 @@ from pyrr import Vector3
 
 
 def rand_spherical(r):
-    r1, r2, r3 = np.random.random((3,))
+    r1, r2, r3 = np.random.random(3)
     r1 *= 2 * np.pi
     r2_sqrt = 2 * np.sqrt(r2 * (1 - r2))
     r3 *= r

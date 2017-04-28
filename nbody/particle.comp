@@ -2,11 +2,9 @@
 
 // const float EPS2 = 1e-3;
 
-//const float GRAVITY_CONSTANT = 6.674e-11;
-const float GRAVITY_CONSTANT = 100;
-
 layout(local_size_x = 256) in;
 
+uniform float gravity_constant;
 uniform uint num_particles;
 uniform float dt;
 
@@ -20,7 +18,6 @@ void main() {
     if (particle_id >= num_particles) return;
 
     vec3  pos  = particles[particle_id * 2    ].xyz;
-    float mass = particles[particle_id * 2    ].w;
     vec3  vel  = particles[particle_id * 2 + 1].xyz;
 
     vec3 acc = vec3(0.0);
@@ -40,11 +37,10 @@ void main() {
     barrier();
     memoryBarrier();
 
-    acc *= GRAVITY_CONSTANT;
+    acc *= gravity_constant;
     vel += acc * dt;
     pos += vel * dt;
 
     particles[particle_id * 2    ].xyz = pos;
-    particles[particle_id * 2    ].w   = mass;
     particles[particle_id * 2 + 1].xyz = vel;
 }

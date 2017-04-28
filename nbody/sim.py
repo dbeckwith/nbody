@@ -17,7 +17,11 @@ class NBodySimulation(object):
     work_group_size = 256
     max_particles = work_group_size * num_galaxies * 20
     collision_overlap = 0.25
-    gravity_constant = 100
+    gravity_constant = 100.0
+    starting_area_radius = 100.0
+    center_star_mass = 1.0e1
+    center_star_radius = 5.0
+    galaxy_star_mass_factor = 1.0e-5
 
     def __init__(self):
         print('Compiling compute shader')
@@ -26,6 +30,7 @@ class NBodySimulation(object):
         self.shader = shaders.compileProgram(shader)
         glUseProgram(self.shader)
 
+        glUniform1f(glGetUniformLocation(self.shader, 'gravity_constant'), self.gravity_constant)
         self.num_particles_loc = glGetUniformLocation(self.shader, 'num_particles')
         self.dt_loc = glGetUniformLocation(self.shader, 'dt')
 
@@ -50,34 +55,32 @@ class NBodySimulation(object):
 
         galaxy_positions = np.empty((self.num_galaxies, 3), dtype=np.float)
         for pos in galaxy_positions:
-            pos[:] = util.rand_spherical(100)
+            pos[:] = util.rand_spherical(self.starting_area_radius)
         galaxy_positions = iter(galaxy_positions)
 
         particles = iter(self.particles_ssbo.data)
         for _ in range(self.num_galaxies):
             center_star = next(particles)
             center_star['position'] = next(galaxy_positions)
-            center_star['mass'] = 1e1
+            center_star['mass'] = self.center_star_mass
             center_star['velocity'] = 0.0
-            center_star['radius'] = 5.0
+            center_star['radius'] = self.center_star_radius
 
             for _ in range(self.num_stars_per_galaxy - 1):
                 star = next(particles)
 
-                star['mass'] = center_star['mass'] * 1e-5
-                star['radius'] = 0.2
+                star['mass'] = center_star['mass'] * self.galaxy_star_mass_factor
+                star['radius'] = np.cbrt(star['mass'] / center_star['mass']) * center_star['radius']
 
-                pr, pt, ph = np.random.random((3,))
-                pt *= 2 * np.pi
-                ph = util.lerp(
-                    ph,
-                    0, 1,
-                    -1, 1)
-                ph *= np.exp(-pr) * center_star['radius'] / 4
+                pt = np.random.uniform(0, 2 * np.pi)
+                pr = np.random.lognormal(sigma=0.5)
                 pr = util.lerp(
                     pr,
                     0, 1,
-                    center_star['radius'] * 1, center_star['radius'] * 2)
+                    center_star['radius'] * 0.5, center_star['radius'] * 1.0)
+                ph = pr / center_star['radius']
+                ph = np.exp(-ph) * center_star['radius'] / 3
+                ph = np.random.uniform(-ph, ph)
                 pos = Vector3([
                     pr * np.cos(pt),
                     ph,
@@ -91,11 +94,7 @@ class NBodySimulation(object):
 
         glUseProgram(0)
 
-        self.paused = True
-
     def update(self, dt):
-        if self.paused: return
-
         PROFILER.begin('update')
 
         glUseProgram(self.shader)

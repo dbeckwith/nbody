@@ -112,6 +112,8 @@ class SimulationView(QOpenGLWidget):
 
         self.last_profiler_print_time = time.time()
 
+        self.paused = True
+
         print('Done initializing')
 
     def update(self):
@@ -121,14 +123,16 @@ class SimulationView(QOpenGLWidget):
 
         PROFILER.begin()
 
-        self.sim.update(dt)
+        if not self.paused:
+            self.sim.update(dt)
 
         super().update()
 
         PROFILER.end()
 
         if t - self.last_profiler_print_time >= self.profiler_print_interval:
-            PROFILER.print_stages()
+            if not self.paused:
+                PROFILER.print_stages()
             PROFILER.reset()
             self.last_profiler_print_time = t
 
@@ -192,7 +196,7 @@ class SimulationView(QOpenGLWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Space:
-            self.sim.paused = not self.sim.paused
+            self.paused = not self.paused
 
 class Camera(object):
     def __init__(self, eye, at, up, fovx, aspect, near, far):
