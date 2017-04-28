@@ -1,8 +1,11 @@
 #version 450 core
 
-const float EPS2 = 1e-3;
+// const float EPS2 = 1e-3;
 
-layout(local_size_x = 1) in;
+//const float GRAVITY_CONSTANT = 6.674e-11;
+const float GRAVITY_CONSTANT = 100;
+
+layout(local_size_x = 256) in;
 
 uniform uint num_particles;
 uniform float dt;
@@ -11,22 +14,14 @@ layout(std430, binding=0) buffer particles_buffer {
     vec4 particles[];
 };
 
-layout(std430, binding=1) buffer forces_buffer {
-    vec4 forces[];
-};
-
-#define PARTICLE_POS(i) (particles[(i) * 2].xyz)
-#define PARTICLE_MASS(i) (particles[(i) * 2].w)
-#define PARTICLE_VEL(i) (particles[(i) * 2 + 1].xyz)
-
 void main() {
     uint particle_id = gl_GlobalInvocationID.x;
 
     if (particle_id >= num_particles) return;
 
-    vec4 particle = particles[particle_id];
-    vec3 pos = particle.xyz;
-    float mass = particle.w;
+    vec3  pos  = particles[particle_id * 2    ].xyz;
+    float mass = particles[particle_id * 2    ].w;
+    vec3  vel  = particles[particle_id * 2 + 1].xyz;
 
     vec3 acc = vec3(0.0);
 
@@ -34,14 +29,21 @@ void main() {
     for (i = 0; i < num_particles; i++) {
         if (i == particle_id) continue;
 
-        vec4 particle2 = particles[i];
-        vec3 pos2 = particle2.xyz;
-        float mass2 = particle2.w;
+        vec3  pos2  = particles[i * 2].xyz;
+        float mass2 = particles[i * 2].w;
 
         vec3 dpos = pos2 - pos;
-        float dist_sq = dot(dpos, dpos) + EPS2;
+        float dist_sq = dot(dpos, dpos);// + EPS2;
         acc += (mass2 / sqrt(dist_sq * dist_sq * dist_sq)) * dpos;
     }
 
-    forces[particle_id].xyz = acc;
+    barrier();
+
+    acc *= GRAVITY_CONSTANT;
+    vel += acc * dt;
+    pos += vel * dt;
+
+    particles[particle_id * 2    ].xyz = pos;
+    particles[particle_id * 2    ].w   = mass;
+    particles[particle_id * 2 + 1].xyz = vel;
 }

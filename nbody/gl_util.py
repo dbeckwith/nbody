@@ -50,14 +50,15 @@ class MappedBufferObject(BufferObject):
         super().__init__(target)
         self.dtype = dtype
         self.length = length
+        self.flags = flags
 
         with self:
-            data_size = dtype.itemsize * length
-            glBufferStorage(self.target, data_size, None, flags)
-            ptr = glMapBufferRange(self.target, 0, data_size, flags)
+            data_size = self.dtype.itemsize * self.length
+            glBufferStorage(self.target, data_size, None, self.flags)
+            ptr = glMapBufferRange(self.target, 0, data_size, self.flags)
             arr_type = ctypes.c_float * (data_size // ctypes.sizeof(ctypes.c_float))
             self.data = np.ctypeslib.as_array(arr_type.from_address(ptr))
-            self.data = self.data.view(dtype=dtype, type=np.ndarray)
+            self.data = self.data.view(dtype=self.dtype, type=np.ndarray)
 
 _gl_sync_obj = None
 
@@ -83,26 +84,27 @@ def gl_sync():
     gl_wait()
 
 def setup_vbo_attrs(vbo, shader, attr_prefix, divisor=0):
-    with vbo:
-        for prop, (sub_dtype, offset) in vbo.dtype.fields.items():
-            prop = attr_prefix + prop
-            loc = glGetAttribLocation(shader, prop)
-            if loc == -1:
-                print('WARNING: shader variable {:s} not found'.format(prop))
-                continue
-            size = int(np.prod(sub_dtype.shape))
-            stride = vbo.dtype.itemsize
-            offset = ctypes.c_void_p(offset)
-            # print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
-            # print('size:', size)
-            # print('stride:', stride)
-            # print('offset:', offset)
-            glEnableVertexAttribArray(loc)
-            glVertexAttribPointer(
-                index=loc,
-                size=size,
-                type=GL_FLOAT,
-                normalized=GL_FALSE,
-                stride=stride,
-                pointer=offset)
-            glVertexAttribDivisor(loc, divisor)
+    glBindBuffer(GL_ARRAY_BUFFER, vbo._buf_id)
+    for prop, (sub_dtype, offset) in vbo.dtype.fields.items():
+        prop = attr_prefix + prop
+        loc = glGetAttribLocation(shader, prop)
+        if loc == -1:
+            print('WARNING: shader variable {:s} not found'.format(prop))
+            continue
+        size = int(np.prod(sub_dtype.shape))
+        stride = vbo.dtype.itemsize
+        offset = ctypes.c_void_p(offset)
+        # print('setting up vertex attribute "{}" @{:d}'.format(prop, loc))
+        # print('size:', size)
+        # print('stride:', stride)
+        # print('offset:', offset)
+        glEnableVertexAttribArray(loc)
+        glVertexAttribPointer(
+            index=loc,
+            size=size,
+            type=GL_FLOAT,
+            normalized=GL_FALSE,
+            stride=stride,
+            pointer=offset)
+        glVertexAttribDivisor(loc, divisor)
+    glBindBuffer(GL_ARRAY_BUFFER, 0)

@@ -2,7 +2,6 @@
 
 import os
 import time
-import traceback
 
 import numpy as np
 from pyrr import Vector3, Vector4, Matrix44
@@ -57,17 +56,11 @@ class SimulationView(QOpenGLWidget):
         glBlendEquation(GL_FUNC_ADD)
 
         print('Compiling render shaders')
-        try:
-            with open(os.path.join(os.path.dirname(__file__), 'particle.vert'), 'r') as f:
-                vshader = shaders.compileShader(f.read(), GL_VERTEX_SHADER)
-            with open(os.path.join(os.path.dirname(__file__), 'particle.frag'), 'r') as f:
-                fshader = shaders.compileShader(f.read(), GL_FRAGMENT_SHADER)
-            self.shader = shaders.compileProgram(vshader, fshader)
-        except BaseException as e:
-            traceback.print_exc()
-            if isinstance(e, RuntimeError):
-                print(e.args[0].replace('\\n', '\n'))
-            exit(1)
+        with open(os.path.join(os.path.dirname(__file__), 'particle.vert'), 'r') as f:
+            vshader = shaders.compileShader(f.read(), GL_VERTEX_SHADER)
+        with open(os.path.join(os.path.dirname(__file__), 'particle.frag'), 'r') as f:
+            fshader = shaders.compileShader(f.read(), GL_FRAGMENT_SHADER)
+        self.shader = shaders.compileProgram(vshader, fshader)
         glUseProgram(self.shader)
 
         print('Mapping uniforms')
@@ -98,18 +91,8 @@ class SimulationView(QOpenGLWidget):
             shader=self.shader,
             attr_prefix='sprite_')
 
-        print('Generating particle data buffer')
-        self.particle_data_vbo = MappedBufferObject(
-            target=GL_ARRAY_BUFFER,
-            dtype=np.dtype([
-                ('radius', np.float32),
-                ('mass', np.float32),
-                ('position', np.float32, 3),
-                ('velocity', np.float32, 3)]),
-            length=self.sim.max_particles,
-            flags=GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
         setup_vbo_attrs(
-            vbo=self.particle_data_vbo,        
+            vbo=self.sim.particles_ssbo,
             shader=self.shader,
             attr_prefix='particle_',
             divisor=1)
@@ -129,11 +112,11 @@ class SimulationView(QOpenGLWidget):
         print('Done initializing')
 
     def update(self):
-        PROFILER.begin()
-
         t = time.time()
         dt = t - self.last_update_time
         self.last_update_time = t
+
+        PROFILER.begin()
 
         self.sim.update(dt)
 
@@ -163,21 +146,10 @@ class SimulationView(QOpenGLWidget):
         self.camera.update()
         glUniformMatrix4fv(self.view_loc, 1, GL_TRUE, self.camera.view.astype(np.float32))
         glUniformMatrix4fv(self.proj_loc, 1, GL_TRUE, self.camera.proj.astype(np.float32))
-        PROFILER.end('render.camera')
 
-        PROFILER.begin('render.particles.data')
-        # TODO: maybe don't need to sort ever? maybe only don't need if no transparency?
-        for data, particle in zip(self.particle_data_vbo.data, sorted(self.sim.particles, key=self._particle_sort, reverse=True)):
-            data['radius'] = particle.radius
-            data['mass'] = particle.mass
-            data['position'] = particle.position
-            data['velocity'] = particle.velocity
-        PROFILER.end('render.particles.data')
-
-        PROFILER.begin('render.particles.draw')
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, self.sprite_data_vbo.length, len(self.sim.particles))
+        PROFILER.begin('render.draw')
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, self.sprite_data_vbo.length, self.sim.num_particles)
         gl_sync()
-        PROFILER.end('render.particles.draw')
 
         glBindVertexArray(0)
         glUseProgram(0)
