@@ -13,9 +13,9 @@ from .gl_util import *
 
 
 class NBodySimulation(object):
-    num_galaxies = 5
+    num_galaxies = 4
     work_group_size = 256
-    max_particles = work_group_size * num_galaxies * 5
+    max_particles = work_group_size * num_galaxies * 20
     collision_overlap = 0.25
     gravity_constant = 100
 
@@ -39,19 +39,29 @@ class NBodySimulation(object):
                 ('radius', np.float32, 1)]),
             length=self.max_particles,
             flags=GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)
+        print('Compute buffer size: {:,d} bytes'.format(self.particles_ssbo.data.nbytes))
 
-        print('Creating particles')
         self.num_particles = len(self.particles_ssbo.data)
+        self.num_stars_per_galaxy = self.num_particles // self.num_galaxies
+        print('Creating {:,d} galaxies with {:,d} stars each ({:,d} particles total)'.format(
+            self.num_galaxies,
+            self.num_stars_per_galaxy,
+            self.num_particles))
+
+        galaxy_positions = np.empty((self.num_galaxies, 3), dtype=np.float)
+        for pos in galaxy_positions:
+            pos[:] = util.rand_spherical(100)
+        galaxy_positions = iter(galaxy_positions)
 
         particles = iter(self.particles_ssbo.data)
         for _ in range(self.num_galaxies):
             center_star = next(particles)
-            center_star['position'] = util.rand_spherical(100)
+            center_star['position'] = next(galaxy_positions)
             center_star['mass'] = 1e1
             center_star['velocity'] = 0.0
             center_star['radius'] = 5.0
 
-            for _ in range(self.num_particles // self.num_galaxies - 1):
+            for _ in range(self.num_stars_per_galaxy - 1):
                 star = next(particles)
 
                 star['mass'] = center_star['mass'] * 1e-5

@@ -38,6 +38,7 @@ void main() {
     }
 
     barrier();
+    memoryBarrier();
 
     acc *= GRAVITY_CONSTANT;
     vel += acc * dt;
