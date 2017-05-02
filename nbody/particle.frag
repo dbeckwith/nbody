@@ -17,16 +17,18 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void main() {
+    // generate radial alpha gradient to look like a sphere, based on collision overlap
     float r = length(frag_uv - 0.5) * 2.0;
     float alpha = 1.0 - smoothstep(1.0 - sqrt(1.0 - (1.0 - collision_overlap) * (1.0 - collision_overlap)), 1.0, r);
     // float alpha = r > 1.0 ? 0.0 : 1.0; // use with multisampling
     float hue = 0.0;
     if (color_mode == 0) {
+        // hue based on mass
         hue = log(frag_mass) / log(15.0);
     }
     else if (color_mode == 1) {
+        // hue based on velocity
         hue = length(frag_velocity) * 0.05;
     }
     color = vec4(hsv2rgb(vec3(hue, 1.0, 1.0)), alpha);
-    // color = vec4(frag_uv, 0.0, 1.0);
 }

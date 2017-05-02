@@ -12,12 +12,16 @@ from .mainwindow import MainWindow
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser('nbody')
+    parser = argparse.ArgumentParser(
+        prog='nbody',
+        description='Shows an interactive real-time simulation of an N-body gravity simulation.',
+        epilog='Created by Daniel Beckwith for WPI CS 4732.')
     parser.add_argument(
         '-s', '--seed',
         required=False,
         default=np.random.randint(0, 2 << 32 - 1, dtype=np.uint32),
-        type=lambda s: int(s, base=0) % (2 << 32))
+        type=lambda s: int(s, base=0) % (2 << 32),
+        help='Seed to use for random number generator when initializing particles.')
     args = parser.parse_args()
 
     print('Using seed {:d}'.format(args.seed))
